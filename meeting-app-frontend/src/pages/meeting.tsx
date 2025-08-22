@@ -1,12 +1,16 @@
 import React, { useEffect, useState } from "react";
-import { Table, Button, message, Popconfirm, Modal, Form, Input, DatePicker, Upload } from "antd";
-import { UploadOutlined, PlusOutlined } from "@ant-design/icons";
+import { Table, Button, message, Popconfirm, Modal, Form, Input, DatePicker, Upload, Space, Tag } from "antd";
+import { UploadOutlined, PlusOutlined, EditOutlined, DeleteOutlined } from "@ant-design/icons";
 import axios from "../api/axios";
 import dayjs from "dayjs";
 
+const normalizeUpload = (e: any) => (Array.isArray(e) ? e : e?.fileList);
+
+
 const Meetings: React.FC = () => {
-  const [meetings, setMeetings] = useState([]);
+  const [meetings, setMeetings] = useState<any[]>([]);
   const [open, setOpen] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
   const [form] = Form.useForm();
 
   const fetchMeetings = async () => {
@@ -16,6 +20,24 @@ const Meetings: React.FC = () => {
     } catch {
       message.error("Toplantılar yüklenemedi");
     }
+  };
+
+  const openCreate = () => {
+    setEditingId(null);
+    form.resetFields();
+    setOpen(true);
+  };
+
+  const openEdit = (record: any) => {
+    setEditingId(record.id);
+    form.setFieldsValue({
+      title: record.title,
+      description: record.description,
+      startDate: record.startDate ? dayjs(record.startDate) : undefined,
+      endDate: record.endDate ? dayjs(record.endDate) : undefined,
+      document: undefined, // mevcut dosyayı göstermek yerine yeni dosya seçtirmek
+    });
+    setOpen(true);
   };
 
   const deleteMeeting = async (id: number) => {
@@ -28,7 +50,7 @@ const Meetings: React.FC = () => {
     }
   };
 
-  const addMeeting = async (values: any) => {
+  const submitForm = async (values: any) => {
     try {
       const formData = new FormData();
       formData.append("title", values.title);
@@ -36,20 +58,25 @@ const Meetings: React.FC = () => {
       formData.append("startDate", values.startDate.toISOString());
       formData.append("endDate", values.endDate.toISOString());
 
-      if (values.document && values.document.file) {
-        formData.append("document", values.document.file as Blob);
+      // Upload değeri: [{originFileObj: File, ...}]
+      const fileObj = values.document?.[0]?.originFileObj;
+      if (fileObj) formData.append("document", fileObj);
+
+      if (editingId == null) {
+        // CREATE
+        await axios.post("/meetings", formData, { headers: { "Content-Type": "multipart/form-data" } });
+        message.success("Toplantı eklendi");
+      } else {
+        // UPDATE
+        await axios.put(`/meetings/${editingId}`, formData, { headers: { "Content-Type": "multipart/form-data" } });
+        message.success("Toplantı güncellendi");
       }
 
-      await axios.post("/meetings", formData, {
-        headers: { "Content-Type": "multipart/form-data" },
-      });
-
-      message.success("Toplantı eklendi");
       setOpen(false);
       form.resetFields();
       fetchMeetings();
     } catch (err: any) {
-      message.error(err.response?.data?.message || "Ekleme hatası");
+      message.error(err?.response?.data?.message || "Kaydetme hatası");
     }
   };
 
@@ -59,67 +86,92 @@ const Meetings: React.FC = () => {
 
   return (
     <div style={{ padding: 20 }}>
-      <h2>Toplantılar</h2>
-      <Button type="primary" icon={<PlusOutlined />} onClick={() => setOpen(true)} style={{ marginBottom: 16 }}>
+    <Space style={{ width: "100%", justifyContent: "space-between", marginBottom: 16 }}>
+      <h2 style={{ margin: 0 }}>Toplantılar</h2>
+      <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
         Toplantı Ekle
       </Button>
+    </Space>
 
-      <Table
-        rowKey="id"
-        dataSource={meetings}
-        columns={[
-          { title: "Başlık", dataIndex: "title" },
-          { title: "Açıklama", dataIndex: "description" },
-          {
-            title: "Başlangıç",
-            dataIndex: "startDate",
-            render: (value: string) => dayjs(value).format("DD.MM.YYYY HH:mm"),
-          },
-          {
-            title: "Bitiş",
-            dataIndex: "endDate",
-            render: (value: string) => dayjs(value).format("DD.MM.YYYY HH:mm"),
-          },
-          {
-            title: "İşlemler",
-            render: (_, record: any) => (
+    <Table
+      rowKey="id"
+      dataSource={meetings}
+      columns={[
+        { title: "Başlık", dataIndex: "title" },
+        { title: "Açıklama", dataIndex: "description", ellipsis: true },
+        {
+          title: "Başlangıç",
+          dataIndex: "startDate",
+          render: (v: string) => (v ? dayjs(v).format("DD.MM.YYYY HH:mm") : "-"),
+        },
+        {
+          title: "Bitiş",
+          dataIndex: "endDate",
+          render: (v: string) => (v ? dayjs(v).format("DD.MM.YYYY HH:mm") : "-"),
+        },
+        {
+          title: "Durum",
+          dataIndex: "status",
+          render: (s: string) =>
+            s ? <Tag color={s === "cancelled" ? "red" : "green"}>{s}</Tag> : <Tag>—</Tag>,
+        },
+        {
+          title: "İşlemler",
+          render: (_: any, record: any) => (
+            <Space>
+              <Button icon={<EditOutlined />} onClick={() => openEdit(record)}>
+                Düzenle
+              </Button>
               <Popconfirm title="Silmek istediğine emin misin?" onConfirm={() => deleteMeeting(record.id)}>
-                <Button danger>Sil</Button>
+                <Button danger icon={<DeleteOutlined />}>
+                  Sil
+                </Button>
               </Popconfirm>
-            ),
-          },
-        ]}
-      />
+            </Space>
+          ),
+        },
+      ]}
+    />
 
-      <Modal
-        title="Toplantı Ekle"
-        open={open}
-        onCancel={() => setOpen(false)}
-        onOk={() => form.submit()}
-        okText="Kaydet"
-        cancelText="İptal"
-      >
-        <Form form={form} layout="vertical" onFinish={addMeeting}>
-          <Form.Item name="title" label="Başlık" rules={[{ required: true, message: "Başlık gerekli" }]}>
-            <Input />
-          </Form.Item>
-          <Form.Item name="description" label="Açıklama">
-            <Input.TextArea rows={3} />
-          </Form.Item>
-          <Form.Item name="startDate" label="Başlangıç Tarihi" rules={[{ required: true }]}>
-            <DatePicker showTime format="DD.MM.YYYY HH:mm" style={{ width: "100%" }} />
-          </Form.Item>
-          <Form.Item name="endDate" label="Bitiş Tarihi" rules={[{ required: true }]}>
-            <DatePicker showTime format="DD.MM.YYYY HH:mm" style={{ width: "100%" }} />
-          </Form.Item>
-          <Form.Item name="document" label="Doküman">
-            <Upload beforeUpload={() => false} maxCount={1}>
-              <Button icon={<UploadOutlined />}>Dosya Yükle</Button>
-            </Upload>
-          </Form.Item>
-        </Form>
-      </Modal>
-    </div>
+    <Modal
+      title={editingId == null ? "Toplantı Ekle" : "Toplantıyı Düzenle"}
+      open={open}
+      onCancel={() => setOpen(false)}
+      onOk={() => form.submit()}
+      okText="Kaydet"
+      cancelText="İptal"
+      destroyOnClose
+    >
+      <Form form={form} layout="vertical" onFinish={submitForm}>
+        <Form.Item name="title" label="Başlık" rules={[{ required: true, message: "Başlık gerekli" }]}>
+          <Input />
+        </Form.Item>
+
+        <Form.Item name="description" label="Açıklama">
+          <Input.TextArea rows={3} />
+        </Form.Item>
+
+        <Form.Item name="startDate" label="Başlangıç Tarihi" rules={[{ required: true }]}>
+          <DatePicker showTime format="DD.MM.YYYY HH:mm" style={{ width: "100%" }} />
+        </Form.Item>
+
+        <Form.Item name="endDate" label="Bitiş Tarihi" rules={[{ required: true }]}>
+          <DatePicker showTime format="DD.MM.YYYY HH:mm" style={{ width: "100%" }} />
+        </Form.Item>
+
+        <Form.Item
+          name="document"
+          label="Doküman"
+          valuePropName="fileList"
+          getValueFromEvent={normalizeUpload}
+        >
+          <Upload beforeUpload={() => false} maxCount={1}>
+            <Button icon={<UploadOutlined />}>Dosya Seç</Button>
+          </Upload>
+        </Form.Item>
+      </Form>
+    </Modal>
+  </div>
   );
 };
 

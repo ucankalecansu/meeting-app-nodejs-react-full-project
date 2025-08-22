@@ -9,6 +9,7 @@ export const createMeeting = async (req: Request, res: Response) => {
     try {
       const { title, description, startDate, endDate } = req.body;
       const document = req.file ? req.file.filename : undefined;
+      console.log(req.body);
   
       const meeting = await Meeting.create({
         title,
@@ -103,7 +104,7 @@ export const deleteMeeting = async (req: Request, res: Response) => {
       // 📧 mail gönder
       await transporter.sendMail({
         from: process.env.EMAIL_USER,
-        to: "ucankalecansu@gmail.com", // burada gerçek katılımcı maili olmalı
+        to: req.body.email, // burada gerçek katılımcı maili olmalı
         subject: `Toplantı Silindi: ${title}`,
         html: `
           <h3>Toplantı Silindi</h3>
