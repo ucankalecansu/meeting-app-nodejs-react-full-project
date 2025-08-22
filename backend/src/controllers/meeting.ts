@@ -2,43 +2,42 @@ import { Request, Response } from "express";
 import Meeting from "../models/Meeting";
 import Log from "../models/Log";
 import transporter from "../config/mailer";
+import { sendMailToParticipants } from "../utils/mailHelper";
 
 
 // ✅ Toplantı oluştur
 export const createMeeting = async (req: Request, res: Response) => {
-    try {
-      const { title, description, startDate, endDate } = req.body;
-      const document = req.file ? req.file.filename : undefined;
-      console.log(req.body);
-  
-      const meeting = await Meeting.create({
-        title,
-        description,
-        startDate,
-        endDate,
-        document,
-        status: "active",
-      });
-  
-      // 📧 mail gönder
-      await transporter.sendMail({
-        from: process.env.EMAIL_USER,
-        to: "ucankalecansu@gmail.com", // burada katılımcı mail adresleri olmalı
-        subject: `Yeni Toplantı Oluşturuldu: ${title}`,
-        html: `
-          <h3>Yeni Toplantı Bilgilendirmesi</h3>
-          <p><b>Başlangıç:</b> ${startDate}</p>
-          <p><b>Bitiş:</b> ${endDate}</p>
-          <p><b>Açıklama:</b> ${description || "Yok"}</p>
-          <p>Toplantı sisteme başarıyla eklendi.</p>
-        `,
-      });
-  
-      res.status(201).json({ message: "Toplantı eklendi ve bilgilendirme maili gönderildi", meeting });
-    } catch (err) {
-      res.status(500).json({ message: "Toplantı oluşturulamadı", error: err });
-    }
-  };
+  try {
+    const { title, description, startDate, endDate, participants } = req.body;
+    const document = req.file ? req.file.filename : undefined;
+
+    const meeting = await Meeting.create({
+      title,
+      description,
+      startDate,
+      endDate,
+      document,
+      status: "active",
+      participants, // 👈 email listesi (virgüllerle ayrılmış string)
+    });
+
+    // 📧 Katılımcılara mail gönder
+    await sendMailToParticipants(
+      participants,
+      `Yeni Toplantı: ${title}`,
+      `
+        <h3>Yeni Toplantı</h3>
+        <p><b>Başlangıç:</b> ${startDate}</p>
+        <p><b>Bitiş:</b> ${endDate}</p>
+        <p><b>Açıklama:</b> ${description || "Yok"}</p>
+      `
+    );
+
+    res.status(201).json(meeting);
+  } catch (err) {
+    res.status(500).json({ message: "Toplantı oluşturulamadı", error: err });
+  }
+};
 
 // ✅ Tüm toplantıları listele
 export const getMeetings = async (req: Request, res: Response) => {
@@ -85,41 +84,31 @@ export const updateMeeting = async (req: Request, res: Response) => {
 
 // ✅ Sil (tamamen kaldır + mail gönder + log)
 export const deleteMeeting = async (req: Request, res: Response) => {
-    try {
-      const meeting = await Meeting.findByPk(req.params.id);
-      if (!meeting) return res.status(404).json({ message: "Toplantı bulunamadı" });
-  
-      const { title, startDate, endDate, description } = meeting;
-  
-      // önce log tablosuna yaz
-      await Log.create({
-        meetingId: meeting.id,
-        reason: "Kullanıcı tarafından silindi",
-        deletedAt: new Date(),
-      });
-  
-      // toplantıyı sil
-      await meeting.destroy();
-  
-      // 📧 mail gönder
-      await transporter.sendMail({
-        from: process.env.EMAIL_USER,
-        to: req.body.email, // burada gerçek katılımcı maili olmalı
-        subject: `Toplantı Silindi: ${title}`,
-        html: `
-          <h3>Toplantı Silindi</h3>
-          <p><b>Başlangıç:</b> ${startDate}</p>
-          <p><b>Bitiş:</b> ${endDate}</p>
-          <p><b>Açıklama:</b> ${description || "Yok"}</p>
-          <p>Bu toplantı sistemden tamamen silindi.</p>
-        `,
-      });
-  
-      res.json({ message: "Toplantı silindi ve bilgilendirme maili gönderildi" });
-    } catch (err) {
-      res.status(500).json({ message: "Toplantı silinemedi", error: err });
-    }
-  };
+  try {
+    const meeting = await Meeting.findByPk(req.params.id);
+    if (!meeting) return res.status(404).json({ message: "Toplantı bulunamadı" });
+
+    const { title, startDate, endDate, description, participants } = meeting;
+
+    await meeting.destroy();
+
+    // 📧 Katılımcılara mail gönder
+    await sendMailToParticipants(
+      participants,
+      `Toplantı Silindi: ${title}`,
+      `
+        <h3>Toplantı Silindi</h3>
+        <p><b>Başlangıç:</b> ${startDate}</p>
+        <p><b>Bitiş:</b> ${endDate}</p>
+        <p><b>Açıklama:</b> ${description || "Yok"}</p>
+      `
+    );
+
+    res.json({ message: "Toplantı silindi ve katılımcılara mail gönderildi" });
+  } catch (err) {
+    res.status(500).json({ message: "Toplantı silinemedi", error: err });
+  }
+};
 
 // ✅ İptal et (status = cancelled)
 export const cancelMeeting = async (req: Request, res: Response) => {
@@ -130,7 +119,19 @@ export const cancelMeeting = async (req: Request, res: Response) => {
     meeting.status = "cancelled";
     await meeting.save();
 
-    res.json({ message: "Toplantı iptal edildi", meeting });
+    // 📧 Katılımcılara mail gönder
+    await sendMailToParticipants(
+      meeting.participants,
+      `Toplantı İptal Edildi: ${meeting.title}`,
+      `
+        <h3>Toplantı İptal Edildi</h3>
+        <p><b>Başlangıç:</b> ${meeting.startDate}</p>
+        <p><b>Bitiş:</b> ${meeting.endDate}</p>
+        <p><b>Açıklama:</b> ${meeting.description || "Yok"}</p>
+      `
+    );
+
+    res.json({ message: "Toplantı iptal edildi ve katılımcılara mail gönderildi", meeting });
   } catch (err) {
     res.status(500).json({ message: "Toplantı iptal edilemedi", error: err });
   }
