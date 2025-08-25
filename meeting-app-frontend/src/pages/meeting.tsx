@@ -318,13 +318,13 @@ const Meetings: React.FC = () => {
                 />
               </Form.Item>
             </Col>
-            <Col xs={24}>
+            {/* <Col xs={24}>
               <Form.Item name="document" label="Doküman" valuePropName="fileList" getValueFromEvent={normalizeUpload}>
                 <Upload beforeUpload={() => false} maxCount={1}>
                   <Button icon={<UploadOutlined />}>Dosya Seç</Button>
                 </Upload>
               </Form.Item>
-            </Col>
+            </Col> */}
           </Row>
         </Form>
       </Modal>
